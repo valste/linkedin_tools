@@ -1,376 +1,739 @@
-const skillsToKeep = [
-    "Project Management",
-    "Portfolio Management",
-    "Power BI",
-    "JIRA",
-    "Confluence",
-    "SharePoint",
-    "SQL"
-];
+(async () => {
+    /******************************************************************
+     * LINKEDIN SKILL CLEANUP
+     * Target: Skills page -> click pencil -> click Delete skill -> confirm
+     ******************************************************************/
 
-const config = {
-    skillsEditorSelector: "#navigation-add-edit-deeplink-edit-skills",
-    successToastSelector: 'div[data-test-artdeco-toast-item-type="success"] p.artdeco-toast-item__message',
-    successToastText: "Deletion was successful.",
-    emptyStateSelector: "section.full-width.artdeco-empty-state",
+    const skillProfiles = {
+        productOwner: [
+            "Product Strategy",
+            "Roadmap Development",
+            "Stakeholder Management",
+            "Backlog Prioritization",
+            "Data Analytics",
+            "User Experience (UX) Design",
+            "Agile Methodologies",
+            "Scrum Leadership",
+            "Market Research",
+            "Business Case Development",
+            "ROI Optimization",
+            "Technical Documentation"
+        ],
 
-    maxOpenAttempts: 5,
-    attemptDelayMs: 1000,
-    afterOpenDelayMs: 1500,
-    afterDeleteClickDelayMs: 1000,
-    successTimeoutMs: 30000,
+        azureAIEngineer: [
+            "Azure OpenAI Service",
+            "Azure Machine Learning (AML)",
+            "Azure AI Search",
+            "Prompt Engineering",
+            "Retrieval-Augmented Generation (RAG)",
+            "MLOps (MLflow & Azure DevOps)",
+            "Azure AI Language & Speech",
+            "Azure AI Vision",
+            "Azure AI Document Intelligence",
+            "Responsible AI & Content Safety",
+            "Agentic AI Frameworks",
+            "Azure Data Factory (ADF)",
+            "Python / C# Proficiency",
+            "REST API & SDK Integration"
+        ]
+    };
 
-    // Safer default: do not delete if the script cannot read the skill name.
-    deleteUnknownSkills: false
-};
+    // Target: Select which skill profile should be kept.
+    const selectedSkillProfile = "productOwner"; // "productOwner" or "azureAIEngineer"
 
-const keepSkillsNormalized = new Set(skillsToKeep.map(normalizeSkill));
+    const config = {
+        // Target: Set true for testing, false for real deletion.
+        dryRun: false,
 
-function normalizeSkill(value) {
-    return String(value || "")
-        .replace(/\s+/g, " ")
-        .trim()
-        .toLowerCase();
-}
+        maxCycles: 200,
 
-function wait(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-}
+        waitAfterEditClickMs: 1500,
+        waitAfterDeleteSkillClickMs: 1000,
+        waitAfterConfirmDeleteMs: 1800,
+        waitBetweenSkillsMs: 1500,
 
-function shouldKeepSkill(skillName) {
-    return keepSkillsNormalized.has(normalizeSkill(skillName));
-}
+        elementWaitTimeoutMs: 20000,
+        deletionWaitTimeoutMs: 30000,
 
-function getCleanText(element) {
-    return element?.textContent?.replace(/\s+/g, " ").trim() || "";
-}
+        autoScrollForMoreSkills: true,
 
-function isBadSkillCandidate(text) {
-    const normalized = normalizeSkill(text);
+        // Target: Prevent deleting skills when the skill name cannot be detected.
+        deleteUnknownSkills: false
+    };
 
-    if (!normalized) return true;
+    const skillsToKeep = skillProfiles[selectedSkillProfile];
 
-    const blockedExactValues = new Set([
-        "delete",
-        "delete skill",
-        "edit",
-        "edit skill",
-        "save",
-        "cancel",
-        "back",
-        "close",
-        "done",
-        "add skill"
-    ]);
-
-    if (blockedExactValues.has(normalized)) return true;
-    if (normalized.length > 100) return true;
-
-    return /\b(endorsement|endorsed|people|connections|followers|recommendations?)\b/i.test(text);
-}
-
-function isDeleteSkillButton(button) {
-    const text = normalizeSkill(button.textContent);
-    const ariaLabel = normalizeSkill(button.getAttribute("aria-label"));
-    const title = normalizeSkill(button.getAttribute("title"));
-
-    return (
-        text === "delete skill" ||
-        ariaLabel === "delete skill" ||
-        ariaLabel.startsWith("delete ") ||
-        title === "delete skill"
-    );
-}
-
-function extractSkillNameFromButtonAttributes(button) {
-    const attributes = [
-        button.getAttribute("aria-label"),
-        button.getAttribute("title")
-    ].filter(Boolean);
-
-    const patterns = [
-        /^delete skill[:\-]?\s+(.+)$/i,
-        /^delete\s+(.+?)\s+skill$/i,
-        /^delete\s+(.+)$/i
-    ];
-
-    for (const attribute of attributes) {
-        for (const pattern of patterns) {
-            const match = attribute.match(pattern);
-            if (match && match[1] && !isBadSkillCandidate(match[1])) {
-                return match[1].trim();
-            }
-        }
+    if (!skillsToKeep) {
+        throw new Error(
+            `Invalid selectedSkillProfile: "${selectedSkillProfile}". ` +
+            `Use one of: ${Object.keys(skillProfiles).join(", ")}`
+        );
     }
 
-    return null;
-}
+    const runId = Date.now();
+    window.__linkedinSkillCleanupRunId = runId;
 
-function findSkillContainer(button) {
-    return (
-        button.closest("li") ||
-        button.closest(".artdeco-list__item") ||
-        button.closest(".pvs-list__paged-list-item") ||
-        button.closest(".pvs-entity") ||
-        button.closest('div[data-view-name*="profile-component-entity"]') ||
-        button.closest("form") ||
-        null
-    );
-}
-
-function extractSkillNameFromForm(button) {
-    const form = button.closest("form");
-    if (!form) return null;
-
-    const fields = Array.from(form.querySelectorAll("input, textarea"));
-
-    for (const field of fields) {
-        const value = field.value?.trim();
-        if (value && !isBadSkillCandidate(value)) {
-            return value;
-        }
+    // Target: Check whether this script run is still the active run.
+    function isCurrentRun() {
+        return window.__linkedinSkillCleanupRunId === runId;
     }
 
-    return null;
-}
+    // Target: Allow manual stop from console via stopLinkedInSkillCleanup().
+    window.stopLinkedInSkillCleanup = function stopLinkedInSkillCleanup() {
+        window.__linkedinSkillCleanupRunId = null;
+        console.warn("LinkedIn skill cleanup stopped.");
+    };
 
-function extractSkillNameFromContainer(button) {
-    const container = findSkillContainer(button);
-    if (!container) return null;
-
-    const candidateSelectors = [
-        'span[aria-hidden="true"]',
-        ".t-bold span",
-        "strong",
-        "h1",
-        "h2",
-        "h3",
-        "h4",
-        "span"
-    ];
-
-    for (const selector of candidateSelectors) {
-        const candidates = Array.from(container.querySelectorAll(selector));
-
-        for (const candidate of candidates) {
-            if (button.contains(candidate)) continue;
-
-            const text = getCleanText(candidate);
-
-            if (text && !isBadSkillCandidate(text)) {
-                return text;
-            }
-        }
+    // Target: Normalize strings for reliable comparison.
+    function normalize(value) {
+        return String(value || "")
+            .replace(/\s+/g, " ")
+            .trim()
+            .toLowerCase();
     }
 
-    return null;
-}
+    const keepSkillsNormalized = new Set(skillsToKeep.map(normalize));
 
-function getSkillNameForDeleteButton(button) {
-    return (
-        extractSkillNameFromButtonAttributes(button) ||
-        extractSkillNameFromForm(button) ||
-        extractSkillNameFromContainer(button)
-    );
-}
+    const deletionLog = [];
+    window.linkedinSkillCleanupDeletionLog = deletionLog;
 
-function displayThankYouMessage(reason) {
-    console.log(
-        "%c Thank you for using the script! %c\n\n" +
-        `${reason}\n` +
-        "You can visit github.com/hv33y for more useful scripts.\n\n" +
-        "Have a great day!",
-        "background: #222; color: #bada55; font-size: 20px; font-weight: bold;",
-        "background: #fff; color: #000; font-size: 16px;"
-    );
-}
+    // Target: Log each deletion attempt/result to the console.
+    function logDeletion(skillName, status, details = "") {
+        const entry = {
+            index: deletionLog.length + 1,
+            timestamp: new Date().toISOString(),
+            skill: skillName,
+            status,
+            details
+        };
 
-function checkForEmptyState() {
-    const emptyState = document.querySelector(config.emptyStateSelector);
+        deletionLog.push(entry);
 
-    if (
-        emptyState &&
-        emptyState.textContent.includes("When you add new skills they'll show up here")
-    ) {
-        displayThankYouMessage("All deletable skills have been removed.");
+        console.log(
+            `%c[LinkedIn Skill Cleanup]%c ${status}: ${skillName}`,
+            "background:#222;color:#bada55;font-weight:bold;padding:2px 4px;",
+            "color:#000;font-weight:bold;"
+        );
+
+        if (details) {
+            console.log(`Details: ${details}`);
+        }
+
+        console.table(deletionLog);
+
+        return entry;
+    }
+
+    // Target: Pause execution for a given number of milliseconds.
+    function wait(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    // Target: Check whether an element is visible and clickable.
+    function isVisible(element) {
+        if (!element) return false;
+
+        const rect = element.getBoundingClientRect();
+        const style = window.getComputedStyle(element);
+
+        return (
+            rect.width > 0 &&
+            rect.height > 0 &&
+            style.display !== "none" &&
+            style.visibility !== "hidden" &&
+            style.opacity !== "0"
+        );
+    }
+
+    // Target: Decide whether a skill should be kept.
+    function shouldKeepSkill(skillName) {
+        return keepSkillsNormalized.has(normalize(skillName));
+    }
+
+    // Target: Click an element using mouse events plus native click.
+    function clickElement(element) {
+        if (!element) return false;
+
+        element.scrollIntoView({ block: "center", behavior: "auto" });
+
+        element.dispatchEvent(new MouseEvent("mouseover", {
+            bubbles: true,
+            cancelable: true,
+            view: window
+        }));
+
+        element.dispatchEvent(new MouseEvent("mousedown", {
+            bubbles: true,
+            cancelable: true,
+            view: window
+        }));
+
+        element.dispatchEvent(new MouseEvent("mouseup", {
+            bubbles: true,
+            cancelable: true,
+            view: window
+        }));
+
+        element.click();
+
         return true;
     }
 
-    return false;
-}
+    // Target: Wait until a DOM condition becomes true.
+    async function waitForCondition(predicate, timeoutMs, intervalMs = 300) {
+        const startedAt = Date.now();
 
-async function openSkillsEditor() {
-    for (let attempt = 1; attempt <= config.maxOpenAttempts; attempt++) {
-        const firstButton = document.querySelector(config.skillsEditorSelector);
+        while (Date.now() - startedAt < timeoutMs) {
+            if (!isCurrentRun()) return null;
 
-        if (firstButton) {
-            firstButton.click();
-            console.log(`Skills editor opened. Attempt ${attempt}.`);
-            return true;
+            const result = predicate();
+
+            if (result) return result;
+
+            await wait(intervalMs);
         }
 
-        console.log(
-            `Button '${config.skillsEditorSelector}' not found. Attempt ${attempt} of ${config.maxOpenAttempts}.`
-        );
-
-        await wait(config.attemptDelayMs);
-    }
-
-    displayThankYouMessage("The skills editor button could not be found after several attempts.");
-    return false;
-}
-
-function clickNextDeletableSkillButton() {
-    const deleteButtons = Array.from(document.querySelectorAll("button"))
-        .filter(isDeleteSkillButton);
-
-    if (!deleteButtons.length) {
-        displayThankYouMessage("No 'Delete skill' buttons were found.");
         return null;
     }
 
-    let keptCount = 0;
-    let unknownCount = 0;
+    /******************************************************************
+     * FIND SKILL EDIT / PENCIL LINKS
+     ******************************************************************/
 
-    for (const button of deleteButtons) {
-        const skillName = getSkillNameForDeleteButton(button);
+    // Target: Extract skill name from edit button/link attributes.
+    function parseSkillNameFromEditElement(element) {
+        const aria = element.getAttribute("aria-label") || "";
+        const title = element.getAttribute("title") || "";
+        const text = element.innerText || element.textContent || "";
 
-        if (skillName && shouldKeepSkill(skillName)) {
-            keptCount++;
-            console.log(`Keeping skill: ${skillName}`);
-            continue;
+        const candidates = [aria, title, text];
+
+        const patterns = [
+            /^edit\s+(.+?)\s+skill$/i,
+            /^edit\s+(.+)$/i,
+            /^bearbeiten\s+(.+?)\s+kenntnis$/i,
+            /^(.+?)\s+bearbeiten$/i
+        ];
+
+        for (const candidate of candidates) {
+            const clean = candidate.replace(/\s+/g, " ").trim();
+
+            for (const pattern of patterns) {
+                const match = clean.match(pattern);
+
+                if (match?.[1]) {
+                    return match[1].trim();
+                }
+            }
         }
 
-        if (!skillName && !config.deleteUnknownSkills) {
-            unknownCount++;
-            console.warn("Skipped one skill because its name could not be detected.", button);
-            continue;
-        }
-
-        button.scrollIntoView({ block: "center", behavior: "auto" });
-        button.click();
-
-        const label = skillName || "UNKNOWN SKILL";
-        console.log(`Delete skill button clicked for: ${label}`);
-
-        return label;
+        return null;
     }
 
-    displayThankYouMessage(
-        `Finished. No more deletable non-kept skills found. Kept ${keptCount} skill(s).` +
-        (unknownCount
-            ? ` Skipped ${unknownCount} skill(s) because their names could not be detected.`
-            : "")
-    );
+    // Target: Extract skill name from the surrounding skill row.
+    function findSkillNameFromNearbyRow(editElement) {
+        const row =
+            editElement.closest("li") ||
+            editElement.closest(".pvs-list__paged-list-item") ||
+            editElement.closest(".artdeco-list__item") ||
+            editElement.closest("[data-view-name]") ||
+            editElement.parentElement;
 
-    return null;
-}
+        if (!row) return null;
 
-async function clickFinalDeleteButton() {
-    for (let attempt = 1; attempt <= 10; attempt++) {
-        const finalDeleteButtons = Array.from(
+        const rawText = row.innerText || row.textContent || "";
+
+        const lines = rawText
+            .split("\n")
+            .map(line => line.replace(/\s+/g, " ").trim())
+            .filter(Boolean);
+
+        const badLinePattern =
+            /experience|experiences|company|companies|endorsement|endorsements|edit|skill|kenntnis|bearbeiten|show all|anzeigen/i;
+
+        return lines.find(line => !badLinePattern.test(line)) || null;
+    }
+
+    // Target: Find all visible LinkedIn skill edit/pencil elements.
+    function findSkillEditElements() {
+        const selector = [
+            'a[href*="/details/skills/edit/forms/"]',
+            'button[aria-label^="Edit "][aria-label*=" skill"]',
+            'a[aria-label^="Edit "][aria-label*=" skill"]',
+            'button[aria-label*="Edit"][aria-label*="skill"]',
+            'a[aria-label*="Edit"][aria-label*="skill"]',
+            'button[aria-label*="Bearbeiten"]',
+            'a[aria-label*="Bearbeiten"]'
+        ].join(",");
+
+        const elements = Array.from(document.querySelectorAll(selector))
+            .filter(isVisible);
+
+        return elements.map(element => {
+            const skillName =
+                parseSkillNameFromEditElement(element) ||
+                findSkillNameFromNearbyRow(element);
+
+            return {
+                element,
+                skillName
+            };
+        });
+    }
+
+    // Target: Find the next skill that is not in the keep-list.
+    function findNextDeletableSkillEditElement() {
+        const editItems = findSkillEditElements();
+
+        for (const item of editItems) {
+            const skillName = item.skillName;
+
+            if (skillName && shouldKeepSkill(skillName)) {
+                console.log(`Keeping skill: ${skillName}`);
+                continue;
+            }
+
+            if (!skillName && !config.deleteUnknownSkills) {
+                console.warn("Skipping skill because its name could not be detected.", item.element);
+                continue;
+            }
+
+            return item;
+        }
+
+        return null;
+    }
+
+    /******************************************************************
+     * FIND MODAL / BUTTONS
+     ******************************************************************/
+
+    // Target: Find visible LinkedIn modal/dialog containers.
+    function getVisibleDialogs() {
+        return Array.from(
+            document.querySelectorAll('[role="dialog"], .artdeco-modal, div[class*="modal"]')
+        ).filter(isVisible);
+    }
+
+    // Target: Find a visible button by text, aria-label, or title.
+    function findButtonByText(textMatchers, options = {}) {
+        const {
+            root = document,
+            exactOnly = false,
+            excludeTexts = []
+        } = options;
+
+        const normalizedMatchers = textMatchers.map(normalize);
+        const normalizedExclusions = excludeTexts.map(normalize);
+
+        const candidates = Array.from(
+            root.querySelectorAll("button, button span, button *")
+        );
+
+        for (const candidate of candidates) {
+            const text = normalize(candidate.textContent || candidate.innerText || "");
+            const aria = normalize(candidate.getAttribute?.("aria-label"));
+            const title = normalize(candidate.getAttribute?.("title"));
+
+            const values = [text, aria, title].filter(Boolean);
+
+            const excluded = values.some(value =>
+                normalizedExclusions.some(exclusion =>
+                    value === exclusion || value.includes(exclusion)
+                )
+            );
+
+            if (excluded) continue;
+
+            const matches = values.some(value =>
+                normalizedMatchers.some(match =>
+                    exactOnly
+                        ? value === match
+                        : value === match || value.includes(match)
+                )
+            );
+
+            if (!matches) continue;
+
+            const button = candidate.closest("button");
+
+            if (button && isVisible(button)) {
+                return button;
+            }
+        }
+
+        return null;
+    }
+
+    // Target: Wait for the "Delete skill" button in the skill edit UI.
+    async function waitForDeleteSkillButton() {
+        return waitForCondition(() => {
+            return findButtonByText([
+                "Delete skill",
+                "Skill löschen",
+                "Kenntnis löschen",
+                "Fähigkeit löschen",
+                "Kompetenz löschen"
+            ], {
+                root: document
+            });
+        }, config.elementWaitTimeoutMs);
+    }
+
+    // Target: Wait for the final confirmation "Delete" button.
+    async function waitForFinalDeleteButton() {
+        return waitForCondition(() => {
+            return findButtonByText(
+                ["Delete", "Löschen"],
+                {
+                    root: document,
+                    exactOnly: true,
+                    excludeTexts: [
+                        "Delete skill",
+                        "Skill löschen",
+                        "Kenntnis löschen",
+                        "Fähigkeit löschen",
+                        "Kompetenz löschen"
+                    ]
+                }
+            );
+        }, config.elementWaitTimeoutMs);
+    }
+
+    // Target: Detect whether the edit UI has opened successfully.
+    async function waitForEditUi(skillName) {
+        return waitForCondition(() => {
+            const deleteSkillButton = findButtonByText([
+                "Delete skill",
+                "Skill löschen",
+                "Kenntnis löschen",
+                "Fähigkeit löschen",
+                "Kompetenz löschen"
+            ], {
+                root: document
+            });
+
+            if (deleteSkillButton) return true;
+
+            const pageText = normalize(document.body.innerText || document.body.textContent || "");
+            const normalizedSkillName = normalize(skillName || "");
+
+            const urlLooksLikeEditForm =
+                location.href.includes("/details/skills/edit/forms/") ||
+                location.href.includes("/skills/edit/forms/");
+
+            const pageLooksLikeEditForm =
+                pageText.includes("delete skill") ||
+                pageText.includes("skill löschen") ||
+                pageText.includes("kenntnis löschen") ||
+                pageText.includes("save") ||
+                pageText.includes("speichern") ||
+                Boolean(normalizedSkillName && pageText.includes(normalizedSkillName));
+
+            if (urlLooksLikeEditForm && pageLooksLikeEditForm) {
+                return true;
+            }
+
+            return null;
+        }, config.elementWaitTimeoutMs);
+    }
+
+    /******************************************************************
+     * DETECT DELETION COMPLETION
+     ******************************************************************/
+
+    // Target: Check whether a skill edit link still exists on the page.
+    function skillStillExistsOnPage(skillName) {
+        const normalizedSkill = normalize(skillName);
+
+        return findSkillEditElements().some(item =>
+            normalize(item.skillName) === normalizedSkill
+        );
+    }
+
+    // Target: Detect LinkedIn success toast after deletion.
+    function successToastExists() {
+        const toastCandidates = Array.from(
             document.querySelectorAll(
-                'button.artdeco-button--primary[data-test-dialog-primary-btn], button[data-test-dialog-primary-btn]'
+                [
+                    'div[data-test-artdeco-toast-item-type="success"]',
+                    ".artdeco-toast-item",
+                    '[role="alert"]'
+                ].join(",")
             )
         );
 
-        const finalDeleteButton = finalDeleteButtons.find(button =>
-            normalizeSkill(button.textContent) === "delete"
+        return toastCandidates.some(toast => {
+            const text = normalize(toast.textContent || toast.innerText);
+
+            return (
+                text.includes("deleted") ||
+                text.includes("deletion") ||
+                text.includes("successful") ||
+                text.includes("deletion was successful") ||
+                text.includes("gelöscht") ||
+                text.includes("erfolgreich")
+            );
+        });
+    }
+
+    // Target: Check whether delete-related UI is still open.
+    function deleteUiStillOpen() {
+        const deleteSkillButton = findButtonByText([
+            "Delete skill",
+            "Skill löschen",
+            "Kenntnis löschen",
+            "Fähigkeit löschen",
+            "Kompetenz löschen"
+        ], {
+            root: document
+        });
+
+        const finalDeleteButton = findButtonByText(
+            ["Delete", "Löschen"],
+            {
+                root: document,
+                exactOnly: true,
+                excludeTexts: [
+                    "Delete skill",
+                    "Skill löschen",
+                    "Kenntnis löschen",
+                    "Fähigkeit löschen",
+                    "Kompetenz löschen"
+                ]
+            }
         );
 
-        if (finalDeleteButton) {
-            finalDeleteButton.click();
-            console.log("Final 'Delete' button clicked successfully.");
+        return Boolean(deleteSkillButton || finalDeleteButton);
+    }
+
+    // Target: Wait until deletion is confirmed by toast or disappearance.
+    async function waitForDeletionCompletion(skillName) {
+        return waitForCondition(() => {
+            if (successToastExists()) {
+                return true;
+            }
+
+            const dialogs = getVisibleDialogs();
+
+            const deleteDialogOpen = dialogs.some(dialog => {
+                const text = normalize(dialog.innerText || dialog.textContent);
+                return text.includes("delete") || text.includes("löschen");
+            });
+
+            if (!deleteDialogOpen && !deleteUiStillOpen() && !skillStillExistsOnPage(skillName)) {
+                return true;
+            }
+
+            return null;
+        }, config.deletionWaitTimeoutMs);
+    }
+
+    /******************************************************************
+     * OPEN, DELETE, CONFIRM
+     ******************************************************************/
+
+    // Target: Open the skill editor by clicking the pencil/edit icon.
+    async function openSkillEditor(skillItem) {
+        const { element, skillName } = skillItem;
+
+        console.log(`Opening editor for skill: ${skillName || "UNKNOWN SKILL"}`);
+
+        if (!config.dryRun) {
+            clickElement(element);
+        }
+
+        await wait(config.waitAfterEditClickMs);
+
+        if (config.dryRun) {
             return true;
         }
 
-        await wait(500);
-    }
+        const editUiReady = await waitForEditUi(skillName || "");
 
-    console.log("Final 'Delete' button not found.");
-    return false;
-}
-
-function checkForSuccessMessage() {
-    return new Promise(resolve => {
-        let resolved = false;
-
-        const finish = value => {
-            if (resolved) return;
-            resolved = true;
-            clearInterval(checkInterval);
-            clearTimeout(timeout);
-            resolve(value);
-        };
-
-        const checkInterval = setInterval(() => {
-            const successMessage = document.querySelector(config.successToastSelector);
-
-            if (
-                successMessage &&
-                successMessage.textContent.trim() === config.successToastText
-            ) {
-                console.log("Deletion success message detected.");
-                finish(true);
-            }
-        }, 1000);
-
-        const timeout = setTimeout(() => {
-            console.log("Timeout: Success message not found within 30 seconds.");
-            finish(false);
-        }, config.successTimeoutMs);
-    });
-}
-
-async function runProcess() {
-    if (window.__linkedinSkillDeleteScriptRunning) {
-        console.warn("Script is already running.");
-        return;
-    }
-
-    window.__linkedinSkillDeleteScriptRunning = true;
-
-    try {
-        while (true) {
-            if (checkForEmptyState()) {
-                return;
-            }
-
-            const editorOpened = await openSkillsEditor();
-            if (!editorOpened) {
-                return;
-            }
-
-            await wait(config.afterOpenDelayMs);
-
-            const skillBeingDeleted = clickNextDeletableSkillButton();
-            if (!skillBeingDeleted) {
-                return;
-            }
-
-            await wait(config.afterDeleteClickDelayMs);
-
-            const finalDeleteClicked = await clickFinalDeleteButton();
-            if (!finalDeleteClicked) {
-                displayThankYouMessage("The final delete confirmation button could not be found.");
-                return;
-            }
-
-            const success = await checkForSuccessMessage();
-
-            if (!success) {
-                displayThankYouMessage(
-                    `Stopping the process because the success message was not detected after deleting: ${skillBeingDeleted}`
-                );
-                return;
-            }
-
-            console.log("Starting next deletion cycle...");
-            await wait(config.attemptDelayMs);
+        if (!editUiReady) {
+            logDeletion(
+                skillName,
+                "FAILED",
+                "Edit UI was not detected after clicking the pencil/edit button."
+            );
+            return false;
         }
-    } finally {
-        window.__linkedinSkillDeleteScriptRunning = false;
-    }
-}
 
-runProcess();
+        console.log(`Edit UI detected for: ${skillName}`);
+        return true;
+    }
+
+    // Target: Execute delete flow for the currently opened skill editor.
+    async function deleteCurrentSkill(skillName) {
+        console.log(`Starting deletion flow for: ${skillName}`);
+
+        const deleteSkillButton = await waitForDeleteSkillButton();
+
+        if (!deleteSkillButton) {
+            logDeletion(skillName, "FAILED", 'Could not find "Delete skill" button.');
+            return false;
+        }
+
+        console.log(`Clicking "Delete skill" for: ${skillName}`);
+
+        if (!config.dryRun) {
+            clickElement(deleteSkillButton);
+        }
+
+        await wait(config.waitAfterDeleteSkillClickMs);
+
+        const finalDeleteButton = await waitForFinalDeleteButton();
+
+        if (finalDeleteButton) {
+            console.log(`Confirming deletion for: ${skillName}`);
+
+            if (!config.dryRun) {
+                clickElement(finalDeleteButton);
+            }
+
+            await wait(config.waitAfterConfirmDeleteMs);
+        } else {
+            console.warn(
+                `No final confirmation button found for: ${skillName}. Checking if deletion completed anyway.`
+            );
+        }
+
+        if (config.dryRun) {
+            logDeletion(
+                skillName,
+                "DRY_RUN",
+                "Skill would be deleted, but dryRun is enabled."
+            );
+            return true;
+        }
+
+        const deletionCompleted = await waitForDeletionCompletion(skillName);
+
+        if (!deletionCompleted) {
+            logDeletion(
+                skillName,
+                "FAILED",
+                "Deletion completion was not detected."
+            );
+            return false;
+        }
+
+        logDeletion(
+            skillName,
+            "DELETED",
+            "Skill deleted successfully or no longer visible on page."
+        );
+
+        return true;
+    }
+
+    /******************************************************************
+     * SCROLL SUPPORT
+     ******************************************************************/
+
+    // Target: Scroll down to load more skills if LinkedIn paginates/lazy-loads.
+    async function scrollForMoreSkills(previousEditCount) {
+        if (!config.autoScrollForMoreSkills) return false;
+
+        const oldScrollY = window.scrollY;
+
+        window.scrollTo({
+            top: document.body.scrollHeight,
+            behavior: "smooth"
+        });
+
+        await wait(1800);
+
+        const newEditCount = findSkillEditElements().length;
+        const newScrollY = window.scrollY;
+
+        return newEditCount > previousEditCount || newScrollY > oldScrollY;
+    }
+
+    /******************************************************************
+     * MAIN LOOP
+     ******************************************************************/
+
+    // Target: Main controller loop for finding and deleting skills.
+    async function runProcess() {
+        console.log(`Selected skill profile: ${selectedSkillProfile}`);
+        console.log(`Dry run: ${config.dryRun}`);
+        console.table(skillsToKeep);
+
+        let deletedCount = 0;
+        let cycle = 0;
+        let noCandidatePasses = 0;
+
+        while (isCurrentRun() && cycle < config.maxCycles) {
+            cycle++;
+
+            const editCountBefore = findSkillEditElements().length;
+            const nextSkill = findNextDeletableSkillEditElement();
+
+            if (!nextSkill) {
+                noCandidatePasses++;
+
+                const foundMore = await scrollForMoreSkills(editCountBefore);
+
+                if (foundMore && noCandidatePasses < 3) {
+                    continue;
+                }
+
+                console.log(
+                    `%cFinished%c\nNo more non-kept skills found.\nDeleted: ${deletedCount}\nProfile: ${selectedSkillProfile}`,
+                    "background:#222;color:#bada55;font-size:18px;font-weight:bold;",
+                    "background:#fff;color:#000;font-size:14px;"
+                );
+
+                console.log("%cDeleted skills summary:", "font-weight:bold;font-size:16px;");
+                console.table(deletionLog);
+
+                return;
+            }
+
+            noCandidatePasses = 0;
+
+            const skillName = nextSkill.skillName || "UNKNOWN SKILL";
+
+            if (config.dryRun) {
+                console.log(`[DRY RUN] Would delete: ${skillName}`);
+                logDeletion(
+                    skillName,
+                    "DRY_RUN",
+                    "First deletable skill found. Set dryRun:false to actually delete."
+                );
+                console.log("Dry run stopped after first deletable skill.");
+                return;
+            }
+
+            const opened = await openSkillEditor(nextSkill);
+
+            if (!opened) {
+                console.warn(`Stopped because editor could not be opened for: ${skillName}`);
+                return;
+            }
+
+            const deleted = await deleteCurrentSkill(skillName);
+
+            if (!deleted) {
+                console.warn(`Stopped because deletion failed for: ${skillName}`);
+                return;
+            }
+
+            deletedCount++;
+
+            await wait(config.waitBetweenSkillsMs);
+        }
+
+        if (!isCurrentRun()) {
+            console.warn("Stopped because a newer run was started or stopLinkedInSkillCleanup() was called.");
+            return;
+        }
+
+        console.warn(`Stopped after maxCycles=${config.maxCycles}. Deleted ${deletedCount} skill(s).`);
+        console.table(deletionLog);
+    }
+
+    await runProcess();
+})();
