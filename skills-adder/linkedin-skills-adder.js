@@ -34,6 +34,19 @@
             "Technical Documentation"
         ],
 
+        aiEngineer: [
+            "Machine Learning & Deep Learning",
+            "Python Programming",
+            "Prompt Engineering & LLMs",
+            "MLOps & Deployment",
+            "Natural Language Processing",
+            "Data Engineering",
+            "Computer Vision",
+            "Agentic AI",
+            "AI Ethics & Governance",
+            "Cloud AI Infrastructure"
+        ],
+
         azureAIEngineer: [
             "Azure OpenAI Service",
             "Azure Machine Learning (AML)",
